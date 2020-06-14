@@ -678,7 +678,6 @@ void init_gpu_stats(uint32_t& vendorID, overlay_params& params)
          params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] = false;
       }
    }
-   parse_pciids();
 }
 
 void init_system_info(){
@@ -711,6 +710,7 @@ void init_system_info(){
                 << "Gpu:" << gpu << "\n"
                 << "Driver:" << driver << std::endl;
 #endif
+      parse_pciids();
 }
 
 void check_keybinds(struct overlay_params& params){
@@ -957,10 +957,11 @@ float get_ticker_limited_pos(float pos, float tw, float& left_limit, float& righ
 }
 
 #ifdef HAVE_DBUS
-void render_mpris_metadata(swapchain_stats& data, const ImVec4& color, metadata& meta, uint64_t frame_timing, bool is_main)
+static void render_mpris_metadata(struct overlay_params& params, metadata& meta, uint64_t frame_timing, bool is_main)
 {
    scoped_lock lk(meta.mutex);
    if (meta.valid) {
+      auto color = ImGui::ColorConvertU32ToFloat4(params.media_player_color);
       ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8,0));
       ImGui::Dummy(ImVec2(0.0f, 20.0f));
       //ImGui::PushFont(data.font1);
@@ -989,18 +990,34 @@ void render_mpris_metadata(swapchain_stats& data, const ImVec4& color, metadata&
 
       meta.ticker.pos -= .5f * (frame_timing / 16666.7f) * meta.ticker.dir;
 
-      new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw0, left_limit, right_limit);
-      ImGui::SetCursorPosX(new_pos);
-      ImGui::TextColored(color, "%s", meta.title.c_str());
-
-      new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw1, left_limit, right_limit);
-      ImGui::SetCursorPosX(new_pos);
-      ImGui::TextColored(color, "%s", meta.artists.c_str());
-      //ImGui::NewLine();
-      if (!meta.album.empty()) {
-         new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw2, left_limit, right_limit);
-         ImGui::SetCursorPosX(new_pos);
-         ImGui::TextColored(color, "%s", meta.album.c_str());
+      for (auto order : params.media_player_order) {
+         switch (order) {
+            case MP_ORDER_TITLE:
+            {
+               new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw0, left_limit, right_limit);
+               ImGui::SetCursorPosX(new_pos);
+               ImGui::TextColored(color, "%s", meta.title.c_str());
+            }
+            break;
+            case MP_ORDER_ARTIST:
+            {
+               new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw1, left_limit, right_limit);
+               ImGui::SetCursorPosX(new_pos);
+               ImGui::TextColored(color, "%s", meta.artists.c_str());
+            }
+            break;
+            case MP_ORDER_ALBUM:
+            {
+               //ImGui::NewLine();
+               if (!meta.album.empty()) {
+                  new_pos = get_ticker_limited_pos(meta.ticker.pos, meta.ticker.tw2, left_limit, right_limit);
+                  ImGui::SetCursorPosX(new_pos);
+                  ImGui::TextColored(color, "%s", meta.album.c_str());
+               }
+            }
+            break;
+            default: break;
+         }
       }
 
       if (is_main && main_metadata.valid && !main_metadata.playing) {
@@ -1024,21 +1041,31 @@ void render_benchmark(swapchain_stats& data, struct overlay_params& params, ImVe
 
    vector<pair<string, float>> benchmark_data = {{"97%", benchmark.ninety}, {"AVG", benchmark.avg}, {"1% ", benchmark.oneP}};
    float display_time = float(now - log_end) / 1000000;
-   float display_for = 10.0f;
+   static float display_for = 10.0f;
    float alpha;
-   if (display_for >= display_time){
-      alpha = display_time * params.background_alpha;
-      if (alpha >= params.background_alpha){
-         ImGui::SetNextWindowBgAlpha(0.5f);
-      }else{
-         ImGui::SetNextWindowBgAlpha(alpha);
+   if(params.background_alpha != 0){
+      if (display_for >= display_time){
+         alpha = display_time * params.background_alpha;
+         if (alpha >= params.background_alpha){
+            ImGui::SetNextWindowBgAlpha(params.background_alpha);
+         }else{
+            ImGui::SetNextWindowBgAlpha(alpha);
+         }
+      } else {
+         alpha = 6.0 - display_time * params.background_alpha;
+         if (alpha >= params.background_alpha){
+            ImGui::SetNextWindowBgAlpha(params.background_alpha);
+         }else{
+            ImGui::SetNextWindowBgAlpha(alpha);
+         }
       }
    } else {
-      alpha = 6.0 - display_time * params.background_alpha;
-      if (alpha >= params.background_alpha){
-         ImGui::SetNextWindowBgAlpha(0.5f);
-      }else{
-         ImGui::SetNextWindowBgAlpha(alpha);
+      if (display_for >= display_time){
+         alpha = display_time * 0.0001;
+         ImGui::SetNextWindowBgAlpha(params.background_alpha);
+      } else {
+         alpha = 6.0 - display_time * 0.0001;
+         ImGui::SetNextWindowBgAlpha(params.background_alpha);
       }
    }
    ImGui::Begin("Benchmark", &open, ImGuiWindowFlags_NoDecoration);
@@ -1058,9 +1085,9 @@ void render_benchmark(swapchain_stats& data, struct overlay_params& params, ImVe
    }
    float max = *max_element(benchmark.fps_data.begin(), benchmark.fps_data.end());
    ImVec4 plotColor = ImGui::ColorConvertU32ToFloat4(params.frametime_color);
-   plotColor.w = alpha;
+   plotColor.w = alpha / params.background_alpha;
    ImGui::PushStyleColor(ImGuiCol_PlotLines, plotColor);
-   ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0, 0.0, 0.0, alpha / 0.8));
+   ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0, 0.0, 0.0, alpha / params.background_alpha));
    ImGui::Dummy(ImVec2(0.0f, 8.0f));
    if (params.enabled[OVERLAY_PARAM_ENABLED_histogram])
       ImGui::PlotHistogram("", benchmark.fps_data.data(), benchmark.fps_data.size(), 0, "", 0.0f, max + 10, ImVec2(ImGui::GetContentRegionAvailWidth(), 50));
@@ -1345,9 +1372,8 @@ void render_imgui(swapchain_stats& data, struct overlay_params& params, ImVec2& 
       ImFont scaled_font;
       scale_default_font(scaled_font, params.font_scale_media_player);
       ImGui::PushFont(&scaled_font);
-      auto media_color = ImGui::ColorConvertU32ToFloat4(params.media_player_color);
-      render_mpris_metadata(data, media_color, main_metadata, frame_timing, true);
-      render_mpris_metadata(data, media_color, generic_mpris, frame_timing, false);
+      render_mpris_metadata(params, main_metadata, frame_timing, true);
+      render_mpris_metadata(params, generic_mpris, frame_timing, false);
       ImGui::PopFont();
 #endif
 
