@@ -28,7 +28,6 @@
 #endif
 
 static enum overlay_param_position
-
 parse_position(const char *str)
 {
    if (!str || !strcmp(str, "top-left"))
@@ -60,21 +59,13 @@ parse_control(const char *str)
 }
 
 static float
-parse_font_size(const char *str)
+parse_float(const char *str)
 {
-   return strtof(str, NULL);
-}
-
-static float
-parse_background_alpha(const char *str)
-{
-   return strtof(str, NULL);
-}
-
-static float
-parse_alpha(const char *str)
-{
-   return strtof(str, NULL);
+   float val = 0;
+   std::stringstream ss(str);
+   ss.imbue(std::locale::classic());
+   ss >> val;
+   return val;
 }
 
 #ifdef HAVE_X11
@@ -115,10 +106,18 @@ parse_reload_cfg(const char *str)
 {
    return parse_string_to_keysym_vec(str);
 }
+
+static std::vector<KeySym>
+parse_upload_log(const char *str)
+{
+   return parse_string_to_keysym_vec(str);
+}
+
 #else
 #define parse_toggle_hud(x)      {}
 #define parse_toggle_logging(x)  {}
 #define parse_reload_cfg(x)      {}
+#define parse_upload_log(x)      {}
 #endif
 
 static uint32_t
@@ -217,10 +216,14 @@ parse_media_player_order(const char *str)
 #define parse_io_write(s) parse_unsigned(s)
 #define parse_pci_dev(s) parse_str(s)
 #define parse_media_player_name(s) parse_str(s)
-#define parse_font_scale_media_player(s) parse_font_size(s)
+#define parse_font_scale_media_player(s) parse_float(s)
 #define parse_cpu_text(s) parse_str(s)
 #define parse_gpu_text(s) parse_str(s)
 #define parse_log_interval(s) parse_unsigned(s)
+#define parse_font_size(s) parse_float(s)
+#define parse_background_alpha(s) parse_float(s)
+#define parse_alpha(s) parse_float(s)
+#define parse_permit_upload(s) parse_unsigned(s)
 
 #define parse_cpu_color(s) parse_color(s)
 #define parse_gpu_color(s) parse_color(s)
@@ -389,11 +392,13 @@ parse_overlay_config(struct overlay_params *params,
    params->font_scale_media_player = 0.55f;
    params->log_interval = 100;
    params->media_player_order = { MP_ORDER_TITLE, MP_ORDER_ARTIST, MP_ORDER_ALBUM };
+   params->permit_upload = 0;
 
 #ifdef HAVE_X11
    params->toggle_hud = { XK_Shift_R, XK_F12 };
    params->toggle_logging = { XK_Shift_L, XK_F2 };
    params->reload_cfg = { XK_Shift_L, XK_F4 };
+   params->upload_log = { XK_Shift_L, XK_F3 };
 #endif
 
    // first pass with env var
@@ -438,6 +443,9 @@ parse_overlay_config(struct overlay_params *params,
    // second pass, override config file settings with MANGOHUD_CONFIG
    if (env && read_cfg)
       parse_overlay_env(params, env);
+
+   if (params->font_scale_media_player <= 0.f)
+      params->font_scale_media_player = 0.55f;
 
    // Convert from 0xRRGGBB to ImGui's format
    std::array<unsigned *, 10> colors = {

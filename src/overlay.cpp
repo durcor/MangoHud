@@ -520,28 +520,6 @@ struct overlay_draw *get_overlay_draw(struct swapchain_data *data)
    return draw;
 }
 
-string exec(string command) {
-   char buffer[128];
-   string result = "";
-
-   // Open pipe to file
-   FILE* pipe = popen(command.c_str(), "r");
-   if (!pipe) {
-      return "popen failed!";
-   }
-
-   // read till end of process:
-   while (!feof(pipe)) {
-
-      // use buffer to read and add to result
-      if (fgets(buffer, 128, pipe) != NULL)
-         result += buffer;
-   }
-
-   pclose(pipe);
-   return result;
-}
-
 void init_cpu_stats(overlay_params& params)
 {
    auto& enabled = params.enabled;
@@ -560,8 +538,8 @@ struct PCI_BUS {
 
 void init_gpu_stats(uint32_t& vendorID, overlay_params& params)
 {
-   if (!params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats])
-      return;
+   //if (!params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats])
+   //   return;
 
    PCI_BUS pci;
    bool pci_bus_parsed = false;
@@ -607,7 +585,10 @@ void init_gpu_stats(uint32_t& vendorID, overlay_params& params)
          nvSuccess = checkXNVCtrl();
 #endif
 
-      if ((params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] = nvSuccess)) {
+      if(not nvSuccess) {
+         params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] = false;
+      }
+      else {
          vendorID = 0x10de;
       }
    }
@@ -634,7 +615,7 @@ void init_gpu_stats(uint32_t& vendorID, overlay_params& params)
 
          path += "/device";
          if (pci_bus_parsed && pci_dev) {
-            string pci_device = readlink(path.c_str());
+            string pci_device = read_symlink(path.c_str());
 #ifndef NDEBUG
             std::cerr << "PCI device symlink: " << pci_device << "\n";
 #endif
@@ -667,7 +648,6 @@ void init_gpu_stats(uint32_t& vendorID, overlay_params& params)
             if (!amdgpu.power_usage)
                amdgpu.power_usage = fopen((path + tempFolder + "/power1_average").c_str(), "r");
 
-            params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] = true;
             vendorID = 0x1002;
             break;
          }
@@ -719,6 +699,7 @@ void check_keybinds(struct overlay_params& params){
    elapsedF2 = (double)(now - last_f2_press);
    elapsedF12 = (double)(now - last_f12_press);
    elapsedReloadCfg = (double)(now - reload_cfg_press);
+   elapsedUpload = (double)(now - last_upload_press);
 
   if (elapsedF2 >= 500000){
 #ifdef HAVE_X11
@@ -732,11 +713,12 @@ void check_keybinds(struct overlay_params& params){
          log_end = now;
          std::thread(calculate_benchmark_data).detach();
        } else {
+         logUpdate = false;
          benchmark.fps_data.clear();
          log_start = now;
        }
        if (!params.output_file.empty() && params.log_duration == 0 && params.log_interval == 0 && loggingOn)
-         writeFile(params.output_file + get_current_time());
+         writeFile(params.output_file + get_log_suffix());
        loggingOn = !loggingOn;
 
        if (!params.output_file.empty() && loggingOn && params.log_interval != 0)
@@ -768,6 +750,19 @@ void check_keybinds(struct overlay_params& params){
          reload_cfg_press = now;
       }
    }
+   
+   if (params.permit_upload && elapsedUpload >= 500000){
+#ifdef HAVE_X11
+      pressed = keys_are_pressed(params.upload_log);
+#else
+      pressed = false;
+#endif
+      if (pressed){
+         last_upload_press = now;
+         if (logFiles.size() > 0)
+            std::thread(upload_file).detach();
+      }
+   }   
 }
 
 void calculate_benchmark_data(){
@@ -807,20 +802,20 @@ void update_hud_info(struct swapchain_stats& sw_stats, struct overlay_params& pa
             now - sw_stats.last_present_time;
    }
 
-   if (sw_stats.last_fps_update) {
+
       if (elapsed >= params.fps_sampling_period) {
 
-         if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_stats]) {
+         if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_stats] || loggingOn) {
             cpuStats.UpdateCPUData();
             sw_stats.total_cpu = cpuStats.GetCPUDataTotal().percent;
 
             if (params.enabled[OVERLAY_PARAM_ENABLED_core_load])
                cpuStats.UpdateCoreMhz();
-            if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_temp])
+            if (params.enabled[OVERLAY_PARAM_ENABLED_cpu_temp] || loggingOn)
                cpuStats.UpdateCpuTemp();
          }
 
-         if (params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats]) {
+         if (params.enabled[OVERLAY_PARAM_ENABLED_gpu_stats] || loggingOn) {
             if (vendorID == 0x1002)
                std::thread(getAmdGpuInfo).detach();
 
@@ -829,14 +824,24 @@ void update_hud_info(struct swapchain_stats& sw_stats, struct overlay_params& pa
          }
 
          // get ram usage/max
-         if (params.enabled[OVERLAY_PARAM_ENABLED_ram])
+         if (params.enabled[OVERLAY_PARAM_ENABLED_ram] || loggingOn)
             std::thread(update_meminfo).detach();
          if (params.enabled[OVERLAY_PARAM_ENABLED_io_read] || params.enabled[OVERLAY_PARAM_ENABLED_io_write])
             std::thread(getIoStats, &sw_stats.io).detach();
 
-         gpuLoadLog = gpu_info.load;
-         cpuLoadLog = sw_stats.total_cpu;
+         currentLogData.gpu_load = gpu_info.load;
+         currentLogData.gpu_temp = gpu_info.temp;
+         currentLogData.gpu_core_clock = gpu_info.CoreClock;
+         currentLogData.gpu_mem_clock = gpu_info.MemClock;
+         currentLogData.gpu_vram_used = gpu_info.memoryUsed;
+         currentLogData.ram_used = memused;
+
+         currentLogData.cpu_load = cpuStats.GetCPUDataTotal().percent;
+         currentLogData.cpu_temp = cpuStats.GetCPUDataTotal().temp;
+
          sw_stats.fps = fps;
+         if (!logUpdate)
+            logUpdate = true;
 
          if (params.enabled[OVERLAY_PARAM_ENABLED_time]) {
             std::time_t t = std::time(nullptr);
@@ -849,9 +854,6 @@ void update_hud_info(struct swapchain_stats& sw_stats, struct overlay_params& pa
          sw_stats.last_fps_update = now;
 
       }
-   } else {
-      sw_stats.last_fps_update = now;
-   }
 
    sw_stats.last_present_time = now;
    sw_stats.n_frames++;
@@ -1333,7 +1335,9 @@ void render_imgui(swapchain_stats& data, struct overlay_params& params, ImVec2& 
          if (params.log_duration && (elapsedLog) >= params.log_duration * 1000000)
             loggingOn = false;
 
-         logArray.push_back({fps, cpuLoadLog, gpuLoadLog, elapsedLog});
+         currentLogData.fps = fps;
+         currentLogData.previous = elapsedLog;
+         logArray.push_back(currentLogData);
       }
 
       if (params.enabled[OVERLAY_PARAM_ENABLED_frame_timing]){

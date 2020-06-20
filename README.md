@@ -153,7 +153,7 @@ A partial list of parameters are below. See the config file for a complete list.
 | `media_player`                     | Show media player metadata                                                            |
 | `media_player_name`                | Set main media player DBus service name without the `org.mpris.MediaPlayer2` part, like `spotify`, `vlc`, `audacious` or `cantata`. Defaults to `spotify`. |
 | `media_player_order`               | Media player metadata field order. Defaults to `title,artist,album`.                  |
-| `font_scale_media_player`          | Change size of media player text relative to font_size                                |                                        
+| `font_scale_media_player`          | Change size of media player text relative to font_size                                |
 | `io_read`<br> `io_write`           | Show non-cached IO read/write, in MiB/s                                               |
 | `pci_dev`                          | Select GPU device in multi-gpu setups                                                 |
 | `version`                          | Shows current mangohud version                                                        |
@@ -166,6 +166,8 @@ A partial list of parameters are below. See the config file for a complete list.
 | `gpu_name`                         | Displays GPU name from pci.ids                                                        |
 | `gpu_power`                        | Display GPU draw in watts                                                             |
 | `engine_version`                   | Display OpenGL or vulkan and vulkan-based render engine's version                     |
+| `permit_upload`                    | Allow uploading of logs to Flightlessmango.com                                        |
+| `upload_log`                       | Change keybind for uploading log                                                      |
 
 Example: `MANGOHUD_CONFIG=cpu_temp,gpu_temp,position=top-right,height=500,font_size=32`
 
