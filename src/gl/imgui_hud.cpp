@@ -10,6 +10,7 @@
 #include "file_utils.h"
 #include "imgui_hud.h"
 #include "notify.h"
+#include "blacklist.h"
 
 #ifdef HAVE_DBUS
 #include "dbus_info.h"
@@ -68,6 +69,7 @@ void imgui_init()
 {
     if (cfg_inited)
         return;
+    is_blacklisted(true);
     parse_overlay_config(&params, getenv("MANGOHUD_CONFIG"));
     notifier.params = &params;
     start_notifier(notifier);
@@ -170,7 +172,7 @@ void imgui_render(unsigned int width, unsigned int height)
     if (!state.imgui_ctx)
         return;
 
-    check_keybinds(params);
+    check_keybinds(sw_stats, params, vendorID);
     update_hud_info(sw_stats, params, vendorID);
 
     ImGuiContext *saved_ctx = ImGui::GetCurrentContext();
