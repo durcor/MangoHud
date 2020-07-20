@@ -67,7 +67,7 @@ float g_overflow = 50.f /* 3333ms * 0.5 / 16.6667 / 2 (to edge and back) */;
 #endif
 
 bool open = false;
-string gpuString;
+string gpuString,wineVersion,wineProcess;
 float offset_x, offset_y, hudSpacing;
 int hudFirstRow, hudSecondRow;
 struct fps_limit fps_limit_stats {};
@@ -689,6 +689,28 @@ void init_system_info(){
       trim(gpu);
       driver = exec("glxinfo | grep 'OpenGL version' | sed 's/^.*: //' | cut -d' ' --output-delimiter=$'\n' -f1- | grep -v '(' | grep -v ')' | tr '\n' ' ' | cut -c 1-");
       trim(driver);
+
+      // Get WINE version
+      wineProcess = exec("pgrep -fl wineserver");
+      if (wineProcess == "") {
+         wineVersion = "N/A";
+      } else {
+         wineProcess = exec("/usr/bin/pgrep -fla wineserver |awk '{print $2}'| awk 'NR==1{print $1}'| /usr/bin/sed 's/wineserver/wine/g'");
+         trim(wineProcess);
+         bool env_exists = false;
+         if (getenv("WINELOADERNOEXEC")) {
+            static char removenoexec[] = "WINELOADERNOEXEC";
+            putenv(removenoexec);
+            env_exists = true;
+         }
+         stringstream command;
+         command << wineProcess << " --version";
+         wineVersion = exec(command.str());
+         if (env_exists) {
+            static char noexec[] = "WINELOADERNOEXEC=1";
+            putenv(noexec);
+         }
+}
       //driver = itox(device_data->properties.driverVersion);
 
       if (ld_preload)
@@ -1339,6 +1361,14 @@ void render_imgui(swapchain_stats& data, struct overlay_params& params, ImVec2& 
          ImGui::Dummy(ImVec2(0.0,5.0f));
          ImGui::TextColored(engine_color, "%s", "" MANGOHUD_ARCH);
          ImGui::PopFont();
+      }
+
+       if (params.enabled[OVERLAY_PARAM_ENABLED_wine]){
+           ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(params.wine_color), "%s","WINE");
+           ImGui::PushFont(data.font1);
+           auto wine_color = ImGui::ColorConvertU32ToFloat4(params.wine_color);
+           ImGui::TextColored(wine_color, "%s", wineVersion.c_str());
+           ImGui::PopFont();
       }
 
       if (params.log_interval == 0){
